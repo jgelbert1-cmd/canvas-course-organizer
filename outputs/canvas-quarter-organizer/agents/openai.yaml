@@ -1,0 +1,4 @@
+interface:
+  display_name: "Canvas Quarter Organizer"
+  short_description: "Download and organize Canvas course files"
+  default_prompt: "Use $canvas-quarter-organizer to set up my new quarter and organize Canvas files into my ASU class folders."
