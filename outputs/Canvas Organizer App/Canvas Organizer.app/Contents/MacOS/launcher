@@ -1,0 +1,30 @@
+#!/bin/zsh
+# Starts the Canvas Organizer server in the background (no Terminal window)
+# and opens it in the default browser. Use the Quit button on the page to stop it.
+APP_ROOT="${0:A:h:h:h:h}"
+PORT=47813
+URL="http://127.0.0.1:${PORT}/"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+if /usr/bin/curl -fs "${URL}api/ping" >/dev/null 2>&1; then
+  /usr/bin/open "$URL"
+  exit 0
+fi
+
+PYTHON="$(command -v python3)"
+if [[ -z "$PYTHON" ]]; then
+  /usr/bin/osascript -e 'display dialog "Canvas Organizer needs Python 3. Install it from python.org, then try again." buttons {"OK"} with icon caution'
+  exit 1
+fi
+
+export CANVAS_UI_NO_BROWSER=1
+LOG_DIR="${HOME}/Library/Application Support/Canvas Module Downloader/logs"
+/bin/mkdir -p "$LOG_DIR"
+"$PYTHON" "${APP_ROOT}/server.py" >> "${LOG_DIR}/organizer-app.log" 2>&1 &
+disown
+
+for _ in {1..30}; do
+  /usr/bin/curl -fs "${URL}api/ping" >/dev/null 2>&1 && break
+  /bin/sleep 0.2
+done
+/usr/bin/open "$URL"

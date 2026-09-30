@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import re
 import secrets
 import shutil
@@ -27,7 +28,6 @@ APP_DIR = Path(__file__).resolve().parent
 OUTPUTS = APP_DIR.parent
 DOWNLOADER_DIR = OUTPUTS / "Canvas Module Downloader"
 COMMON_ZSH = DOWNLOADER_DIR / "lib/common.zsh"
-LAUNCHER = DOWNLOADER_DIR / "Canvas Module Downloader.command"
 ORGANIZER = OUTPUTS / "canvas-quarter-organizer/scripts/organize_canvas_files.py"
 STATIC = APP_DIR / "static"
 
@@ -38,7 +38,12 @@ CONFIG_ROOT = Path(
 )
 KEYCHAIN_SERVICE = "Canvas Module Downloader API Token"
 AGENT_FILE = HOME / "Library/LaunchAgents/com.local.canvas-module-downloader.plist"
-CLASSES_ROOT = Path(os.environ.get("CANVAS_CLASSES_ROOT") or HOME / "Documents/ASU/Classes")
+AGENT_LABEL = "com.local.canvas-module-downloader"
+SECURITY = os.environ.get("CANVAS_UI_SECURITY", "/usr/bin/security")
+LAUNCHCTL = os.environ.get("CANVAS_UI_LAUNCHCTL", "/bin/launchctl")
+SETTINGS_FILE = CONFIG_ROOT / "ui-settings.json"
+DEFAULT_PORT = 47813
+TOKEN_RE = re.compile(r"^[A-Za-z0-9~_.\-]{10,300}$")
 CURRENT_DIR_RE = re.compile(r"^(?:\d+\s+)?Current(?:\s*-\s*.+)?$", re.IGNORECASE)
 
 # Test hook: replace the real downloader with another executable.
@@ -72,25 +77,70 @@ def selected_courses() -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
+def load_settings() -> dict:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_setting(key: str, value: str) -> None:
+    ensure_config_root()
+    data = load_settings()
+    data[key] = value
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    SETTINGS_FILE.chmod(0o600)
+
+
+def classes_root() -> Path:
+    env = os.environ.get("CANVAS_CLASSES_ROOT")
+    saved = load_settings().get("classes_root")
+    return Path(env or saved or HOME / "Documents/ASU/Classes")
+
+
+def ensure_config_root() -> None:
+    CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+    CONFIG_ROOT.chmod(0o700)
+
+
+def write_private(path: Path, text: str) -> None:
+    ensure_config_root()
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+
 def token_saved(url: str) -> bool:
     if FAKE_DOWNLOADER:
         return True
-    if not url or not shutil.which("security"):
+    if not url or not Path(SECURITY).exists():
         return False
     result = subprocess.run(
-        ["/usr/bin/security", "find-generic-password", "-a", url, "-s", KEYCHAIN_SERVICE],
+        [SECURITY, "find-generic-password", "-a", url, "-s", KEYCHAIN_SERVICE],
         capture_output=True,
     )
     return result.returncode == 0
 
 
 def current_class_folders() -> dict:
-    if not CLASSES_ROOT.is_dir():
-        return {"root": str(CLASSES_ROOT), "current": None, "folders": []}
-    current = sorted(p for p in CLASSES_ROOT.iterdir() if p.is_dir() and CURRENT_DIR_RE.fullmatch(p.name))
-    base = current[0] if len(current) == 1 else CLASSES_ROOT
+    root = classes_root()
+    if not root.is_dir():
+        return {"root": str(root), "exists": False, "current": None, "folders": []}
+    current = sorted(p for p in root.iterdir() if p.is_dir() and CURRENT_DIR_RE.fullmatch(p.name))
+    base = current[0] if len(current) == 1 else root
     folders = sorted((p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")), key=str.casefold)
-    return {"root": str(CLASSES_ROOT), "current": base.name if base != CLASSES_ROOT else None, "folders": folders}
+    return {"root": str(root), "exists": True, "current": base.name if base != root else None, "folders": folders}
+
+
+def sync_schedule() -> dict | None:
+    try:
+        plist = plistlib.loads(AGENT_FILE.read_bytes())
+        when = plist["StartCalendarInterval"]
+        return {"hour": int(when["Hour"]), "minute": int(when["Minute"])}
+    except (OSError, KeyError, ValueError, plistlib.InvalidFileException):
+        return None
 
 
 def status() -> dict:
@@ -102,10 +152,83 @@ def status() -> dict:
         "selected": selected_courses(),
         "destination": str(destination()),
         "destination_exists": destination().is_dir(),
-        "daily_sync": AGENT_FILE.is_file(),
+        "daily_sync": sync_schedule(),
         "classes": current_class_folders(),
         "fake": bool(FAKE_DOWNLOADER),
     }
+
+
+def save_access(url: str, token: str) -> str | None:
+    """Store the token in Keychain via `security -i`, so it never appears in argv."""
+    if not re.fullmatch(r"https://[A-Za-z0-9.\-]+(:\d+)?", url):
+        return "Enter a web address like https://canvas.asu.edu"
+    if not TOKEN_RE.fullmatch(token):
+        return "That does not look like a Canvas token. Copy it again without spaces."
+    if not Path(SECURITY).exists():
+        return "Keychain is only available on macOS."
+    label = f"Canvas API token for {url}"
+    command = f'add-generic-password -U -a "{url}" -s "{KEYCHAIN_SERVICE}" -l "{label}" -w "{token}"\n'
+    subprocess.run([SECURITY, "-i"], input=command, capture_output=True, text=True)
+    if not token_saved(url):
+        return "macOS would not save the token to Keychain."
+    write_private(CONFIG_ROOT / "canvas-url.txt", url + "\n")
+    return None
+
+
+def remove_token() -> str | None:
+    url = canvas_url()
+    result = subprocess.run([SECURITY, "delete-generic-password", "-a", url, "-s", KEYCHAIN_SERVICE],
+                            capture_output=True)
+    return None if result.returncode == 0 else "No saved token was found."
+
+
+def pick_folder(prompt: str) -> str | None:
+    script = f'POSIX path of (choose folder with prompt "{prompt}")'
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    path = result.stdout.strip()
+    return path.rstrip("/") if result.returncode == 0 and path.startswith("/") else None
+
+
+def enable_sync(hour: int, minute: int) -> str | None:
+    runtime = CONFIG_ROOT / "runtime"
+    try:
+        for sub in ("bin", "lib", "scripts"):
+            (runtime / sub).mkdir(parents=True, exist_ok=True)
+        for src, dst in (
+            (DOWNLOADER_DIR / "bin/canvas-downloader", runtime / "bin/canvas-downloader"),
+            (COMMON_ZSH, runtime / "lib/common.zsh"),
+            (DOWNLOADER_DIR / "scripts/background-sync.zsh", runtime / "scripts/background-sync.zsh"),
+        ):
+            shutil.copy2(src, dst)
+            dst.chmod(0o700)
+        (CONFIG_ROOT / "logs").mkdir(exist_ok=True)
+        plist = {
+            "Label": AGENT_LABEL,
+            "ProgramArguments": ["/bin/zsh", str(runtime / "scripts/background-sync.zsh")],
+            "StartCalendarInterval": {"Hour": hour, "Minute": minute},
+            "StandardOutPath": str(CONFIG_ROOT / "logs/daily-sync.log"),
+            "StandardErrorPath": str(CONFIG_ROOT / "logs/daily-sync-errors.log"),
+            "ProcessType": "Background",
+        }
+        AGENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = AGENT_FILE.with_name(f".{AGENT_FILE.name}.tmp")
+        tmp.write_bytes(plistlib.dumps(plist))
+        tmp.chmod(0o600)
+        domain = f"gui/{os.getuid()}"
+        subprocess.run([LAUNCHCTL, "bootout", domain, str(AGENT_FILE)], capture_output=True)
+        tmp.replace(AGENT_FILE)
+        result = subprocess.run([LAUNCHCTL, "bootstrap", domain, str(AGENT_FILE)], capture_output=True)
+    except OSError as exc:
+        return f"Could not set up the schedule: {exc}"
+    return None if result.returncode == 0 else "The schedule file was saved, but macOS did not start it."
+
+
+def disable_sync() -> None:
+    subprocess.run([LAUNCHCTL, "bootout", f"gui/{os.getuid()}", str(AGENT_FILE)], capture_output=True)
+    AGENT_FILE.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------- jobs
@@ -183,7 +306,7 @@ def downloader_cmd(extra: list[str], courses: list[str] | None) -> list[str]:
 
 
 def organizer_cmd(maps: dict[str, str], apply: bool) -> list[str]:
-    cmd = [sys.executable, str(ORGANIZER), "--classes-root", str(CLASSES_ROOT),
+    cmd = [sys.executable, str(ORGANIZER), "--classes-root", str(classes_root()),
            "--downloads-root", str(destination()), "--verbose"]
     for course in selected_courses():
         cmd += ["--course", course]
@@ -239,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path == "/api/ping":
+            return self.send_json({"app": "canvas-organizer"})
         if not self.authorized():
             return self.send_json({"error": "unauthorized"}, 403)
         if path == "/api/status":
@@ -278,11 +403,47 @@ class Handler(BaseHTTPRequestHandler):
         if needs_canvas and not (st["configured"] and st["token_saved"]):
             return self.send_json({"error": "Canvas access is not set up yet."}, 400)
 
-        if path == "/api/open-setup":
-            if not shutil.which("open"):
-                return self.send_json({"error": "Only available on macOS."}, 400)
-            subprocess.Popen(["open", str(LAUNCHER)])
+        if path == "/api/access/save":
+            error = save_access(str(data.get("url", "")).strip().rstrip("/"), str(data.get("token", "")).strip())
+            return self.send_json({"error": error}, 400) if error else self.send_json({"ok": True})
+
+        if path == "/api/access/remove":
+            if data.get("confirm") is not True:
+                return self.send_json({"error": "Confirmation required."}, 400)
+            error = remove_token()
+            return self.send_json({"error": error}, 400) if error else self.send_json({"ok": True})
+
+        if path == "/api/pick-folder":
+            purpose = data.get("purpose")
+            if purpose not in {"destination", "classes"}:
+                return self.send_json({"error": "bad request"}, 400)
+            chosen = pick_folder("Choose the folder for downloaded Canvas files" if purpose == "destination"
+                                 else "Choose your Classes folder")
+            if not chosen:
+                return self.send_json({"ok": False})
+            if purpose == "destination":
+                write_private(CONFIG_ROOT / "destination.txt", chosen + "\n")
+            else:
+                save_setting("classes_root", chosen)
             return self.send_json({"ok": True})
+
+        if path == "/api/sync/enable":
+            hour, minute = data.get("hour"), data.get("minute")
+            if not (isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59):
+                return self.send_json({"error": "Pick a valid time."}, 400)
+            if not (st["configured"] and st["token_saved"] and st["selected"]):
+                return self.send_json({"error": "Set up access and choose courses first."}, 400)
+            error = enable_sync(hour, minute)
+            return self.send_json({"error": error}, 500) if error else self.send_json({"ok": True})
+
+        if path == "/api/sync/disable":
+            disable_sync()
+            return self.send_json({"ok": True})
+
+        if path == "/api/quit":
+            self.send_json({"ok": True})
+            threading.Timer(0.3, lambda: os._exit(0)).start()
+            return
 
         if path == "/api/courses/list":
             return self.job_response("List Canvas courses", downloader_cmd(["--dry-run"], None))
@@ -334,8 +495,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    port = int(os.environ.get("CANVAS_UI_PORT", "0"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    port = int(os.environ.get("CANVAS_UI_PORT", DEFAULT_PORT))
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"Canvas Organizer is running at {url}")
     print("Keep this window open while you use it. Press Control-C to stop.")

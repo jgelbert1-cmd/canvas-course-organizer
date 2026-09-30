@@ -33,20 +33,29 @@
   th { color:var(--mute); font-weight:500; font-size:13px; }
   pre.log { background:var(--log); color:var(--log-ink); padding:12px; border-radius:8px; max-height:300px; overflow:auto; font:12px/1.45 ui-monospace,Menlo,monospace; white-space:pre-wrap; margin:10px 0 0; display:none; }
   .pill { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); color:var(--mute); }
+  .field { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; } .field label { width:130px; color:var(--mute); }
   #banner { display:none; padding:10px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--bad); color:var(--bad); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Canvas Organizer</h1>
+  <div style="display:flex;justify-content:space-between;align-items:baseline"><h1>Canvas Organizer</h1><button id="quit">Quit app</button></div>
   <p class="sub">Pull course files from Canvas and file them into your class folders. Everything runs on this Mac.</p>
   <div id="banner"></div>
 
   <section id="s1">
     <h2><span class="num">1</span> Canvas access</h2>
     <div id="access" class="mute">Checking…</div>
-    <div class="row"><button id="setup">Open setup in Terminal</button><button id="recheck">Re-check</button></div>
-    <div class="mute" style="margin-top:8px;font-size:13px">Your token is pasted into a secure macOS Keychain prompt in Terminal (menu option 1). It is never typed into this page.</div>
+    <div id="accessform">
+      <div class="field"><label for="url">Canvas address</label>
+        <select id="urlpick"><option value="https://canvas.asu.edu">Arizona State (canvas.asu.edu)</option><option value="other">Another school…</option></select>
+        <input type="text" id="url" placeholder="https://yourschool.instructure.com" style="display:none" size="36"></div>
+      <div class="field"><label for="token">Access token</label>
+        <input type="password" id="token" autocomplete="off" placeholder="Paste token here" size="36"></div>
+      <div class="row"><button id="savetoken" class="primary">Save to Keychain</button><button id="removetoken" style="display:none">Remove saved token</button></div>
+      <div class="mute" style="margin-top:8px;font-size:13px">In Canvas: Account → Settings → Approved Integrations → + New Access Token. The token goes straight into your Mac's Keychain and is never shown again or stored in a file.</div>
+    </div>
+    <div class="row"><button id="changeaccess" style="display:none">Replace token…</button></div>
   </section>
 
   <section id="s2" class="locked">
@@ -60,7 +69,7 @@
 
   <section id="s3" class="locked">
     <h2><span class="num">3</span> Download</h2>
-    <div class="mute">To <code id="dest"></code>. Submissions are never downloaded.</div>
+    <div class="mute">To <code id="dest"></code> <button id="pickdest">Change…</button> Submissions are never downloaded.</div>
     <div class="row">
       <button id="preview">Preview</button>
       <button id="sync" class="primary">Download new files</button>
@@ -73,17 +82,27 @@
 
   <section id="s4" class="locked">
     <h2><span class="num">4</span> Organize into class folders</h2>
-    <div class="mute" id="classinfo"></div>
+    <div class="mute"><span id="classinfo"></span> <button id="pickclasses">Change…</button></div>
     <div class="row"><button id="opreview">Preview mapping</button><button id="oapply" class="primary" disabled>Apply</button></div>
     <table id="maptable" style="display:none"><thead><tr><th>Canvas course</th><th>Class folder</th><th>Files</th></tr></thead><tbody></tbody></table>
     <pre id="log4" class="log"></pre>
+  </section>
+  <section id="s5" class="locked">
+    <h2><span class="num">5</span> Automatic daily sync <span class="pill">optional</span></h2>
+    <div id="syncinfo" class="mute"></div>
+    <div class="row">
+      <label for="synctime" class="mute">Check for new files every day at</label>
+      <select id="synctime"></select>
+      <button id="syncon" class="primary">Turn on</button><button id="syncoff" style="display:none">Turn off</button>
+    </div>
+    <div class="mute" style="margin-top:8px;font-size:13px">Downloads new files only and never overwrites. It does not file them into class folders; come back here and press Preview mapping, then Apply.</div>
   </section>
 </main>
 
 <script>
 const TOKEN = "__SESSION_TOKEN__";
 const $ = id => document.getElementById(id);
-let state = null, allCourses = [], chosen = new Set(), busy = false, maps = {}, lastPreviewClean = false;
+let editingAccess = false, state = null, allCourses = [], chosen = new Set(), busy = false, maps = {}, lastPreviewClean = false;
 
 async function api(path, body) {
   const opt = { headers: { "X-Session-Token": TOKEN } };
@@ -141,7 +160,16 @@ function render() {
   $("s2").classList.toggle("done", ready && s.selected.length > 0);
   $("selected").innerHTML = s.selected.length ? `Saved selection (${s.selected.length}): ` + s.selected.map(c => `<span class="pill">${esc(c)}</span>`).join(" ") : "No courses selected yet.";
   $("dest").textContent = s.destination;
-  $("classinfo").textContent = s.classes.current ? `Filing into ${s.classes.root}/${s.classes.current}` : `Classes folder: ${s.classes.root}${s.classes.folders.length || s.classes.current ? "" : " (not found)"}`;
+  $("accessform").style.display = ready && !editingAccess ? "none" : "";
+  $("changeaccess").style.display = ready && !editingAccess ? "" : "none";
+  $("removetoken").style.display = ready ? "" : "none";
+  $("s5").classList.toggle("locked", !(ready && s.selected.length));
+  $("syncinfo").textContent = s.daily_sync ? `On: every day at ${fmtTime(s.daily_sync.hour, s.daily_sync.minute)}.` : "Off.";
+  $("syncon").textContent = s.daily_sync ? "Change time" : "Turn on";
+  $("syncoff").style.display = s.daily_sync ? "" : "none";
+  if (s.daily_sync) $("synctime").value = `${s.daily_sync.hour}:${s.daily_sync.minute}`;
+  if (s.configured && !$("url").value) { const known = [...$("urlpick").options].some(o => o.value === s.canvas_url); if (known) $("urlpick").value = s.canvas_url; else { $("urlpick").value = "other"; $("url").value = s.canvas_url; $("url").style.display = ""; } }
+  $("classinfo").textContent = !s.classes.exists ? `Classes folder not found: ${s.classes.root}` : s.classes.current ? `Filing into ${s.classes.root}/${s.classes.current}` : `Filing into ${s.classes.root}`;
 }
 const esc = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 async function refreshStatus() { try { state = await api("/api/status"); render(); } catch (e) { banner(e.message); } }
@@ -154,8 +182,6 @@ function renderCourses() {
 }
 function updateCount() { $("count").textContent = chosen.size + " checked"; }
 
-$("setup").onclick = async () => { try { await api("/api/open-setup", {}); } catch (e) { banner(e.message); } };
-$("recheck").onclick = refreshStatus;
 $("load").onclick = async () => {
   const r = await runJob("/api/courses/list", {}, "log2");
   if (!r) return;
@@ -215,31 +241,80 @@ function parseOrganizer(lines) {
   }
   return order.map(k => rows[k]);
 }
+function suggestName(course) {
+  const m = course.match(/([A-Za-z]{2,4})(\d{3})/);
+  return m ? `${m[1].toUpperCase()} ${m[2]} - ` : "";
+}
 function renderMap(rows) {
   const tb = $("maptable").querySelector("tbody");
   $("maptable").style.display = rows.length ? "" : "none";
-  const folders = state.classes.folders;
+  const opts = `<option value="">Choose a class folder…</option>` + state.classes.folders.map(f => `<option>${esc(f)}</option>`).join("") + `<option value="__new">New folder…</option>`;
   tb.innerHTML = rows.map(r => r.unresolved
-    ? `<tr><td>${esc(r.course)}</td><td><input type="text" list="fl" data-course="${esc(r.course)}" placeholder="Pick or type a class folder" size="32"><br><small class="warn">${esc(r.note)}</small></td><td></td></tr>`
-    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(r.counts)}</td></tr>`).join("")
-    + `<datalist id="fl">${folders.map(f => `<option value="${esc(f)}">`).join("")}</datalist>`;
+    ? `<tr><td>${esc(r.course)}</td><td><select data-course="${esc(r.course)}">${opts}</select> <input type="text" class="newname" data-for="${esc(r.course)}" value="${esc(suggestName(r.course))}" size="30" style="display:none"><br><small class="warn">${esc(r.note)}</small></td><td></td></tr>`
+    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(r.counts)}</td></tr>`).join("");
 }
-$("maptable").onchange = e => { const c = e.target.dataset && e.target.dataset.course; if (c) { const v = e.target.value.trim(); if (v) maps[c] = v; else delete maps[c]; lastPreviewClean = false; $("oapply").disabled = true; } };
+function collectMaps() {
+  document.querySelectorAll("#maptable select[data-course]").forEach(sel => {
+    const course = sel.dataset.course;
+    let v = sel.value;
+    if (v === "__new") v = document.querySelector(`#maptable input.newname[data-for="${CSS.escape(course)}"]`).value.trim();
+    if (v && !/[\/]/.test(v)) maps[course] = v; else delete maps[course];
+  });
+}
+$("maptable").onchange = e => {
+  const t = e.target, c = t.dataset.course;
+  if (c) { const box = document.querySelector(`#maptable input.newname[data-for="${CSS.escape(c)}"]`); box.style.display = t.value === "__new" ? "" : "none"; }
+  lastPreviewClean = false; $("oapply").disabled = true;
+};
 $("opreview").onclick = async () => {
-  document.querySelectorAll("#maptable input[data-course]").forEach(i => { if (i.value.trim()) maps[i.dataset.course] = i.value.trim(); });
+  collectMaps();
   const r = await runJob("/api/organize/preview", { maps }, "log4");
   if (!r) return;
   const rows = parseOrganizer(r.lines);
+  await refreshStatus();
   renderMap(rows);
   lastPreviewClean = r.code === 0 && rows.length > 0;
   $("oapply").disabled = !lastPreviewClean;
-  if (r.code === 2) banner("Some courses need a class folder. Pick one above and preview again.");
+  if (r.code === 2) banner("Some courses need a class folder. Pick one in the table and preview again.");
 };
 $("oapply").onclick = async () => {
   if (!confirm("Copy files into your class folders now? Existing files are never overwritten; differences are saved as Canvas conflict copies.")) return;
   const r = await runJob("/api/organize/apply", { maps }, "log4");
   lastPreviewClean = false; $("oapply").disabled = true;
   if (r && r.code === 0) await refreshStatus();
+};
+
+const fmtTime = (h, m) => new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+for (const h of [6, 7, 8, 9, 12, 18, 21]) $("synctime").add(new Option(fmtTime(h, 0), `${h}:0`, false, h === 7));
+
+$("urlpick").onchange = () => { $("url").style.display = $("urlpick").value === "other" ? "" : "none"; };
+$("changeaccess").onclick = () => { editingAccess = true; render(); };
+$("savetoken").onclick = async () => {
+  const url = $("urlpick").value === "other" ? $("url").value.trim() : $("urlpick").value;
+  try {
+    await api("/api/access/save", { url, token: $("token").value.trim() });
+    $("token").value = ""; editingAccess = false; banner("");
+    await refreshStatus();
+  } catch (e) { banner(e.message); }
+};
+$("removetoken").onclick = async () => {
+  if (!confirm("Remove the saved Canvas token from Keychain? Daily sync will stop working until you add a new one.")) return;
+  try { await api("/api/access/remove", { confirm: true }); await refreshStatus(); } catch (e) { banner(e.message); }
+};
+async function pickFolder(purpose) {
+  try { const r = await api("/api/pick-folder", { purpose }); if (r.ok) await refreshStatus(); } catch (e) { banner(e.message); }
+}
+$("pickdest").onclick = () => pickFolder("destination");
+$("pickclasses").onclick = () => pickFolder("classes");
+$("syncon").onclick = async () => {
+  const [hour, minute] = $("synctime").value.split(":").map(Number);
+  try { await api("/api/sync/enable", { hour, minute }); banner(""); await refreshStatus(); } catch (e) { banner(e.message); }
+};
+$("syncoff").onclick = async () => { await api("/api/sync/disable", {}); await refreshStatus(); };
+$("quit").onclick = async () => {
+  if (!confirm("Quit Canvas Organizer? Daily sync keeps running if you turned it on.")) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  document.body.innerHTML = '<main><h1>Canvas Organizer has quit.</h1><p class="sub">You can close this tab. Open Canvas Organizer again any time.</p></main>';
 };
 
 refreshStatus();
