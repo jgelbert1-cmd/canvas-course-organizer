@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canvas Organizer</title>
+<style>
+  :root { --bg:#f6f6f3; --card:#fff; --ink:#1d1d1b; --mute:#6b6b66; --line:#dcdcd5; --accent:#8c1d40; --accent-ink:#fff; --ok:#1e7a46; --warn:#9a6700; --bad:#b42318; --log:#15151a; --log-ink:#dcdcd5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151515; --card:#1f1f1f; --ink:#ececea; --mute:#9a9a94; --line:#333; --accent:#e0698a; --accent-ink:#151515; --ok:#4cc38a; --warn:#e5b64a; --bad:#ff7b72; --log:#0c0c0e; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 80px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mute); margin:0 0 20px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  section.locked { opacity:.55; }
+  h2 { font-size:16px; margin:0 0 10px; display:flex; align-items:center; gap:10px; }
+  .num { width:24px; height:24px; border-radius:50%; background:var(--line); color:var(--ink); display:inline-grid; place-items:center; font-size:13px; }
+  .done .num { background:var(--ok); color:#fff; }
+  button { font:inherit; padding:7px 14px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  .mute { color:var(--mute); } .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  ul.courses { list-style:none; padding:0; margin:10px 0 0; max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  ul.courses li { padding:8px 12px; border-bottom:1px solid var(--line); }
+  ul.courses li:last-child { border-bottom:0; }
+  ul.courses label { display:flex; gap:10px; cursor:pointer; }
+  ul.courses small { display:block; color:var(--mute); }
+  input[type=text], select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+  table { width:100%; border-collapse:collapse; margin-top:10px; }
+  td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--mute); font-weight:500; font-size:13px; }
+  pre.log { background:var(--log); color:var(--log-ink); padding:12px; border-radius:8px; max-height:300px; overflow:auto; font:12px/1.45 ui-monospace,Menlo,monospace; white-space:pre-wrap; margin:10px 0 0; display:none; }
+  .pill { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); color:var(--mute); }
+  #banner { display:none; padding:10px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--bad); color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Canvas Organizer</h1>
+  <p class="sub">Pull course files from Canvas and file them into your class folders. Everything runs on this Mac.</p>
+  <div id="banner"></div>
+
+  <section id="s1">
+    <h2><span class="num">1</span> Canvas access</h2>
+    <div id="access" class="mute">Checking…</div>
+    <div class="row"><button id="setup">Open setup in Terminal</button><button id="recheck">Re-check</button></div>
+    <div class="mute" style="margin-top:8px;font-size:13px">Your token is pasted into a secure macOS Keychain prompt in Terminal (menu option 1). It is never typed into this page.</div>
+  </section>
+
+  <section id="s2" class="locked">
+    <h2><span class="num">2</span> Courses</h2>
+    <div id="selected" class="mute"></div>
+    <div class="row"><button id="load" class="primary">Load my Canvas courses</button><input type="text" id="filter" placeholder="Filter…" style="display:none"></div>
+    <ul id="courses" class="courses" style="display:none"></ul>
+    <div class="row" id="saverow" style="display:none"><button id="save" class="primary">Save selection</button><span id="count" class="mute"></span></div>
+    <pre id="log2" class="log"></pre>
+  </section>
+
+  <section id="s3" class="locked">
+    <h2><span class="num">3</span> Download</h2>
+    <div class="mute">To <code id="dest"></code>. Submissions are never downloaded.</div>
+    <div class="row">
+      <button id="preview">Preview</button>
+      <button id="sync" class="primary">Download new files</button>
+      <button id="refresh">Refresh instructor updates…</button>
+      <button id="cancel" style="display:none">Cancel</button>
+    </div>
+    <div class="mute" style="margin-top:8px;font-size:13px">Refresh can overwrite local copies in the download cache. Your class folders are never overwritten by it.</div>
+    <pre id="log3" class="log"></pre>
+  </section>
+
+  <section id="s4" class="locked">
+    <h2><span class="num">4</span> Organize into class folders</h2>
+    <div class="mute" id="classinfo"></div>
+    <div class="row"><button id="opreview">Preview mapping</button><button id="oapply" class="primary" disabled>Apply</button></div>
+    <table id="maptable" style="display:none"><thead><tr><th>Canvas course</th><th>Class folder</th><th>Files</th></tr></thead><tbody></tbody></table>
+    <pre id="log4" class="log"></pre>
+  </section>
+</main>
+
+<script>
+const TOKEN = "__SESSION_TOKEN__";
+const $ = id => document.getElementById(id);
+let state = null, allCourses = [], chosen = new Set(), busy = false, maps = {}, lastPreviewClean = false;
+
+async function api(path, body) {
+  const opt = { headers: { "X-Session-Token": TOKEN } };
+  if (body !== undefined) { opt.method = "POST"; opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const res = await fetch(path, opt);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function banner(msg) { const b = $("banner"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
+function setBusy(v) {
+  busy = v;
+  ["load","preview","sync","refresh","opreview","save"].forEach(i => $(i).disabled = v);
+  $("oapply").disabled = v || !lastPreviewClean;
+  $("cancel").style.display = v ? "" : "none";
+}
+
+async function runJob(startPath, body, logId) {
+  banner("");
+  const log = $(logId); log.style.display = "block"; log.textContent = "";
+  setBusy(true);
+  let lines = [];
+  let job;
+  try {
+    const r = await api(startPath, body);
+    let from = 0;
+    while (true) {
+      job = await api(`/api/jobs/${r.job}?from=${from}`);
+      if (job.lines.length) {
+        const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+        log.textContent += job.lines.join("\n") + "\n";
+        lines = lines.concat(job.lines);
+        if (atBottom) log.scrollTop = log.scrollHeight;
+      }
+      from = job.total;
+      if (job.done) break;
+      await new Promise(r => setTimeout(r, 600));
+    }
+    log.textContent += job.cancelled ? "\nCancelled.\n" : job.code === 0 ? "\nFinished.\n" : `\nStopped with exit code ${job.code}.\n`;
+    log.scrollTop = log.scrollHeight;
+  } catch (e) { banner(e.message); setBusy(false); return null; }
+  setBusy(false);
+  return { code: job.code, lines };
+}
+
+function render() {
+  const s = state, ready = s.configured && s.token_saved;
+  $("access").innerHTML = !s.configured ? `<span class="warn">Not set up yet.</span> Open setup and choose option 1.`
+    : !s.token_saved ? `<span class="warn">${s.canvas_url}</span>: no token found in Keychain. Open setup and choose option 1.`
+    : `<span class="ok">Connected:</span> ${s.canvas_url} (token saved in Keychain)`;
+  $("s1").classList.toggle("done", ready);
+  $("s2").classList.toggle("locked", !ready);
+  $("s3").classList.toggle("locked", !(ready && s.selected.length));
+  $("s4").classList.toggle("locked", !(ready && s.selected.length));
+  $("s2").classList.toggle("done", ready && s.selected.length > 0);
+  $("selected").innerHTML = s.selected.length ? `Saved selection (${s.selected.length}): ` + s.selected.map(c => `<span class="pill">${esc(c)}</span>`).join(" ") : "No courses selected yet.";
+  $("dest").textContent = s.destination;
+  $("classinfo").textContent = s.classes.current ? `Filing into ${s.classes.root}/${s.classes.current}` : `Classes folder: ${s.classes.root}${s.classes.folders.length || s.classes.current ? "" : " (not found)"}`;
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function refreshStatus() { try { state = await api("/api/status"); render(); } catch (e) { banner(e.message); } }
+
+function renderCourses() {
+  const q = $("filter").value.toLowerCase();
+  $("courses").innerHTML = allCourses.filter(c => c.raw.toLowerCase().includes(q)).map(c =>
+    `<li><label><input type="checkbox" value="${esc(c.code)}" ${chosen.has(c.code) ? "checked" : ""}><span>${esc(c.name || c.code)}<small>${esc(c.code)}</small></span></label></li>`).join("");
+  updateCount();
+}
+function updateCount() { $("count").textContent = chosen.size + " checked"; }
+
+$("setup").onclick = async () => { try { await api("/api/open-setup", {}); } catch (e) { banner(e.message); } };
+$("recheck").onclick = refreshStatus;
+$("load").onclick = async () => {
+  const r = await runJob("/api/courses/list", {}, "log2");
+  if (!r) return;
+  allCourses = parseCourses(r.lines.join("\n"));
+  chosen = new Set(state.selected);
+  if (!allCourses.length) { banner("No courses could be read from the output. Check the log."); return; }
+  $("log2").style.display = "none";
+  ["filter","courses","saverow"].forEach(i => $(i).style.display = "");
+  $("filter").style.display = "";
+  renderCourses();
+};
+function parseCourses(out) {
+  const res = []; let seen = false;
+  for (const raw of out.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("Courses found")) { seen = true; continue; }
+    if (!seen) continue;
+    if (line.startsWith("[DRY RUN]") && res.length) break;
+    const m = line.match(/^[*\-•]\s+(.*)$/);
+    if (!m) continue;
+    const i = m[1].indexOf(" - ");
+    res.push({ code: (i < 0 ? m[1] : m[1].slice(0, i)).trim(), name: i < 0 ? "" : m[1].slice(i + 3).trim(), raw: m[1] });
+  }
+  return res;
+}
+$("courses").onchange = e => { e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value); updateCount(); };
+$("filter").oninput = renderCourses;
+$("save").onclick = async () => {
+  try { await api("/api/courses/select", { courses: [...chosen] }); banner(""); await refreshStatus(); }
+  catch (e) { banner(e.message); }
+};
+$("preview").onclick = () => runJob("/api/download/preview", {}, "log3");
+$("sync").onclick = async () => { await runJob("/api/download/sync", {}, "log3"); };
+$("refresh").onclick = () => {
+  if (prompt("Refresh can overwrite cached files with newer instructor versions.\nType REFRESH to continue.") !== "REFRESH") return;
+  runJob("/api/download/refresh", { confirm: "REFRESH" }, "log3");
+};
+$("cancel").onclick = () => api("/api/jobs/cancel", {});
+
+function parseOrganizer(lines) {
+  const rows = {}, order = [];
+  let section = "";
+  for (const l of lines) {
+    if (l.startsWith("Course mappings:")) section = "map";
+    else if (l.startsWith("Planned results:")) section = "res";
+    else if (!l.startsWith("  ")) section = "";
+    else if (section === "map") {
+      const m = l.match(/^  (\S+) -> (.+?)(?: \[(\w+)\])?$/);
+      if (!m) continue;
+      const unresolved = m[2].startsWith("UNRESOLVED");
+      rows[m[1]] = { course: m[1], folder: m[2], unresolved, note: unresolved ? m[2] : m[3] || "", counts: "" };
+      order.push(m[1]);
+    } else if (section === "res") {
+      const m = l.match(/^  (\S+): (.+)$/);
+      if (m && rows[m[1]]) rows[m[1]].counts = m[2];
+    }
+  }
+  return order.map(k => rows[k]);
+}
+function renderMap(rows) {
+  const tb = $("maptable").querySelector("tbody");
+  $("maptable").style.display = rows.length ? "" : "none";
+  const folders = state.classes.folders;
+  tb.innerHTML = rows.map(r => r.unresolved
+    ? `<tr><td>${esc(r.course)}</td><td><input type="text" list="fl" data-course="${esc(r.course)}" placeholder="Pick or type a class folder" size="32"><br><small class="warn">${esc(r.note)}</small></td><td></td></tr>`
+    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(r.counts)}</td></tr>`).join("")
+    + `<datalist id="fl">${folders.map(f => `<option value="${esc(f)}">`).join("")}</datalist>`;
+}
+$("maptable").onchange = e => { const c = e.target.dataset && e.target.dataset.course; if (c) { const v = e.target.value.trim(); if (v) maps[c] = v; else delete maps[c]; lastPreviewClean = false; $("oapply").disabled = true; } };
+$("opreview").onclick = async () => {
+  document.querySelectorAll("#maptable input[data-course]").forEach(i => { if (i.value.trim()) maps[i.dataset.course] = i.value.trim(); });
+  const r = await runJob("/api/organize/preview", { maps }, "log4");
+  if (!r) return;
+  const rows = parseOrganizer(r.lines);
+  renderMap(rows);
+  lastPreviewClean = r.code === 0 && rows.length > 0;
+  $("oapply").disabled = !lastPreviewClean;
+  if (r.code === 2) banner("Some courses need a class folder. Pick one above and preview again.");
+};
+$("oapply").onclick = async () => {
+  if (!confirm("Copy files into your class folders now? Existing files are never overwritten; differences are saved as Canvas conflict copies.")) return;
+  const r = await runJob("/api/organize/apply", { maps }, "log4");
+  lastPreviewClean = false; $("oapply").disabled = true;
+  if (r && r.code === 0) await refreshStatus();
+};
+
+refreshStatus();
+</script>
+</body>
+</html>
