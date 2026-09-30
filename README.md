@@ -5,6 +5,7 @@ A private macOS toolkit for downloading Canvas course materials and organizing t
 ## Included components
 
 - `outputs/Canvas Module Downloader/`: a double-clickable macOS launcher with Keychain-based token storage and optional daily syncing.
+- `outputs/Canvas Organizer App/`: a local browser interface that wraps both tools: pick courses, download, and organize with previews.
 - `outputs/canvas-quarter-organizer/`: a Codex skill for new-quarter setup, course selection, downloading, and safe class-folder organization.
 
 The organizer keeps the downloader cache intact, copies materials into current class folders, avoids completed-course archives, and protects manually edited files from being overwritten.
