@@ -42,6 +42,8 @@ def parse_args() -> argparse.Namespace:
         metavar="COURSE=CLASS_FOLDER",
         help="Map a cache course directory to a direct child of the classes root",
     )
+    parser.add_argument("--skip", action="append", default=[], metavar="COURSE/RELATIVE_PATH", help="Leave one downloaded file out (repeatable)")
+    parser.add_argument("--json-plan", type=Path, help="Also write the planned mappings and file actions to this JSON file")
     parser.add_argument("--apply", action="store_true", help="Create folders and copy files")
     parser.add_argument("--verbose", action="store_true", help="Print every planned file action")
     return parser.parse_args()
@@ -309,6 +311,8 @@ def main() -> int:
     mappings: list[tuple[str, str, str]] = []
     seen_by_course: dict[str, set[str]] = {}
     counters: dict[str, Counter] = {}
+    report: list[dict] = []
+    skipped = set(args.skip)
 
     for course_dir in all_courses:
         key = course_key(course_dir.name)
@@ -348,13 +352,20 @@ def main() -> int:
         counts = counters.setdefault(course_dir.name, Counter())
 
         for relative, source in course_files(course_dir):
+            source_key = f"{course_dir.name}/{relative.as_posix()}"
+            if source_key in skipped:
+                counts["user-skipped"] += 1
+                report.append({"action": "user-skipped", "course": course_dir.name, "key": source_key, "to": ""})
+                continue
             if source.stat().st_size == 0:
                 counts["empty-skipped"] += 1
+                report.append({"action": "empty-skipped", "course": course_dir.name, "key": source_key, "to": ""})
                 continue
             source_hash = sha256(source)
             deduplicate = source.suffix.casefold() not in {".html", ".htm"}
             if deduplicate and source_hash in seen_hashes:
                 counts["duplicate-skipped"] += 1
+                report.append({"action": "duplicate-skipped", "course": course_dir.name, "key": source_key, "to": ""})
                 continue
             if deduplicate:
                 seen_hashes.add(source_hash)
@@ -388,6 +399,10 @@ def main() -> int:
                         action = "conflict-copy"
 
             counts[action] += 1
+            report.append({
+                "action": action, "course": course_dir.name, "key": source_state_key,
+                "to": final_destination.relative_to(class_dir).as_posix(),
+            })
             plan.append(
                 {
                     "action": action,
@@ -420,6 +435,17 @@ def main() -> int:
         for item in plan:
             if item["action"] not in {"unchanged", "unchanged-conflict"}:
                 print(f"  {item['action']}: {item['destination']}")
+
+    if args.json_plan:
+        payload = {
+            "mappings": [
+                {"course": c, "folder": f, "display": d, "source": src} for c, f, d, src in mappings
+            ],
+            "unresolved": [{"course": c, "reason": r} for c, r in unresolved],
+            "files": report,
+        }
+        args.json_plan.parent.mkdir(parents=True, exist_ok=True)
+        args.json_plan.write_text(json.dumps(payload), encoding="utf-8")
 
     if unresolved:
         print("\nResolve every course mapping before applying.", file=sys.stderr)

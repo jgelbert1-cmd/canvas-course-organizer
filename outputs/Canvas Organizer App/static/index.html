@@ -5,36 +5,55 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Canvas Organizer</title>
 <style>
-  :root { --bg:#f6f6f3; --card:#fff; --ink:#1d1d1b; --mute:#6b6b66; --line:#dcdcd5; --accent:#8c1d40; --accent-ink:#fff; --ok:#1e7a46; --warn:#9a6700; --bad:#b42318; --log:#15151a; --log-ink:#dcdcd5; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#151515; --card:#1f1f1f; --ink:#ececea; --mute:#9a9a94; --line:#333; --accent:#e0698a; --accent-ink:#151515; --ok:#4cc38a; --warn:#e5b64a; --bad:#ff7b72; --log:#0c0c0e; } }
+  :root { --bg:#faf9f5; --card:#ffffff; --ink:#141413; --mute:#73726c; --line:#e8e6dc; --accent:#c6613f; --accent-hover:#b5543a; --accent-ink:#fff; --soft:#f0eee6; --ok:#2f7d4f; --warn:#a8710f; --bad:#b3372b; --log:#1f1e1d; --log-ink:#e8e6dc; --radius:14px; --serif:"Iowan Old Style","Charter","Georgia",serif; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#262624; --card:#30302e; --ink:#faf9f5; --mute:#a3a29b; --line:#454440; --accent:#d97757; --accent-hover:#e48a6c; --accent-ink:#1f1e1d; --soft:#3a3937; --ok:#6fcf97; --warn:#e5b64a; --bad:#ff8a7a; --log:#1a1918; } }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-  main { max-width:860px; margin:0 auto; padding:24px 16px 80px; }
-  h1 { font-size:22px; margin:0 0 4px; }
-  .sub { color:var(--mute); margin:0 0 20px; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
-  section.locked { opacity:.55; }
-  h2 { font-size:16px; margin:0 0 10px; display:flex; align-items:center; gap:10px; }
-  .num { width:24px; height:24px; border-radius:50%; background:var(--line); color:var(--ink); display:inline-grid; place-items:center; font-size:13px; }
-  .done .num { background:var(--ok); color:#fff; }
-  button { font:inherit; padding:7px 14px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
-  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  main { max-width:820px; margin:0 auto; padding:40px 20px 96px; }
+  h1 { font:500 30px/1.2 var(--serif); letter-spacing:-.01em; margin:0 0 6px; }
+  .sub { color:var(--mute); margin:0 0 26px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:20px 22px; margin-bottom:16px; box-shadow:0 1px 2px rgba(20,20,19,.04); }
+  section.locked { opacity:.5; }
+  h2 { font:500 19px/1.3 var(--serif); margin:0 0 12px; display:flex; align-items:center; gap:12px; }
+  .num { width:26px; height:26px; border-radius:50%; background:var(--soft); color:var(--mute); display:inline-grid; place-items:center; font:600 12px -apple-system,system-ui,sans-serif; }
+  .done .num { background:var(--accent); color:var(--accent-ink); }
+  button { font:inherit; font-size:14px; padding:7px 14px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; transition:background .15s,border-color .15s; }
+  button:hover:not(:disabled) { background:var(--soft); }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:500; }
+  button.primary:hover:not(:disabled) { background:var(--accent-hover); border-color:var(--accent-hover); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px; }
   .mute { color:var(--mute); } .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
-  ul.courses { list-style:none; padding:0; margin:10px 0 0; max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  code { background:var(--soft); padding:1px 6px; border-radius:6px; font-size:13px; }
+  input[type=checkbox] { accent-color:var(--accent); }
+  ul.courses { list-style:none; padding:0; margin:10px 0 0; max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:12px; }
   ul.courses li { padding:8px 12px; border-bottom:1px solid var(--line); }
   ul.courses li:last-child { border-bottom:0; }
   ul.courses label { display:flex; gap:10px; cursor:pointer; }
   ul.courses small { display:block; color:var(--mute); }
-  input[type=text], select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+  input[type=text], input[type=password], select { font:inherit; font-size:14px; padding:7px 10px; border:1px solid var(--line); border-radius:9px; background:var(--card); color:var(--ink); }
   table { width:100%; border-collapse:collapse; margin-top:10px; }
   td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
   th { color:var(--mute); font-weight:500; font-size:13px; }
-  pre.log { background:var(--log); color:var(--log-ink); padding:12px; border-radius:8px; max-height:300px; overflow:auto; font:12px/1.45 ui-monospace,Menlo,monospace; white-space:pre-wrap; margin:10px 0 0; display:none; }
-  .pill { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); color:var(--mute); }
+  pre.log { background:var(--log); color:var(--log-ink); padding:12px; border-radius:10px; max-height:300px; overflow:auto; font:12px/1.45 ui-monospace,Menlo,monospace; white-space:pre-wrap; margin:10px 0 0; display:none; }
+  .pill { font-size:12px; padding:1px 9px; border-radius:99px; background:var(--soft); color:var(--mute); }
   .field { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; } .field label { width:130px; color:var(--mute); }
-  #banner { display:none; padding:10px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--bad); color:var(--bad); }
+  ul.courses li.grp { background:var(--bg); display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:13px; padding:5px 12px; position:sticky; top:0; }
+  ul.courses li.grp button { padding:2px 8px; font-size:12px; }
+  .plan { margin-top:12px; display:grid; gap:10px; }
+  .plan details { border:1px solid var(--line); border-radius:8px; }
+  .plan summary { padding:9px 12px; cursor:pointer; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .plan .body { padding:0 12px 10px; }
+  .plan .dir { margin-top:10px; font-weight:600; font-size:13px; color:var(--mute); }
+  .plan .dir:before { content:"\1F4C1  "; }
+  .plan label.f { display:flex; gap:8px; padding:2px 0 2px 18px; font-size:14px; align-items:baseline; }
+  .plan .f.off span.nm { text-decoration:line-through; color:var(--mute); }
+  .plan .f.muted { color:var(--mute); padding-left:18px; font-size:13px; }
+  .badge { font-size:11px; padding:0 7px; border-radius:99px; border:1px solid currentColor; }
+  .badge.new { color:var(--ok); } .badge.updated { color:var(--warn); } .badge.conflict { color:var(--bad); }
+  #plansum { margin-top:10px; }
+  #banner { display:none; padding:11px 15px; border-radius:10px; background:var(--card); margin-bottom:14px; border:1px solid var(--bad); color:var(--bad); }
 </style>
 </head>
 <body>
@@ -61,15 +80,15 @@
   <section id="s2" class="locked">
     <h2><span class="num">2</span> Courses</h2>
     <div id="selected" class="mute"></div>
-    <div class="row"><button id="load" class="primary">Load my Canvas courses</button><input type="text" id="filter" placeholder="Filter…" style="display:none"></div>
+    <div class="row"><button id="load" class="primary">Load my Canvas courses</button><input type="text" id="filter" placeholder="Search…" style="display:none"><button id="selall" style="display:none">Select all</button><button id="selnone" style="display:none">Select none</button></div>
     <ul id="courses" class="courses" style="display:none"></ul>
-    <div class="row" id="saverow" style="display:none"><button id="save" class="primary">Save selection</button><span id="count" class="mute"></span></div>
+    <div class="row" id="saverow" style="display:none"><span id="count" class="mute"></span><span id="savestate" class="mute"></span></div>
     <pre id="log2" class="log"></pre>
   </section>
 
   <section id="s3" class="locked">
     <h2><span class="num">3</span> Download</h2>
-    <div class="mute">To <code id="dest"></code> <button id="pickdest">Change…</button> Submissions are never downloaded.</div>
+    <div class="mute">To <code id="dest"></code> <button id="pickdest">Change…</button> <button id="opendest">Open in Finder</button> Submissions are never downloaded.</div>
     <div class="row">
       <button id="preview">Preview</button>
       <button id="sync" class="primary">Download new files</button>
@@ -82,9 +101,10 @@
 
   <section id="s4" class="locked">
     <h2><span class="num">4</span> Organize into class folders</h2>
-    <div class="mute"><span id="classinfo"></span> <button id="pickclasses">Change…</button></div>
+    <div class="mute"><span id="classinfo"></span> <button id="pickclasses">Change…</button> <button id="openclasses">Open in Finder</button></div>
     <div class="row"><button id="opreview">Preview mapping</button><button id="oapply" class="primary" disabled>Apply</button></div>
-    <table id="maptable" style="display:none"><thead><tr><th>Canvas course</th><th>Class folder</th><th>Files</th></tr></thead><tbody></tbody></table>
+    <div id="plansum" class="mute"></div>
+    <div id="plan" class="plan"></div>
     <pre id="log4" class="log"></pre>
   </section>
   <section id="s5" class="locked">
@@ -95,7 +115,9 @@
       <select id="synctime"></select>
       <button id="syncon" class="primary">Turn on</button><button id="syncoff" style="display:none">Turn off</button>
     </div>
-    <div class="mute" style="margin-top:8px;font-size:13px">Downloads new files only and never overwrites. It does not file them into class folders; come back here and press Preview mapping, then Apply.</div>
+    <div class="row"><label><input type="checkbox" id="autoorg"> After each sync, also file new downloads into class folders</label></div>
+    <div class="mute" style="margin-top:8px;font-size:13px">Downloads new files only and never overwrites. With the box ticked it files them too, but only when every class already has a folder (choose them once in step 4). Otherwise it leaves the files in the download folder and tells you.</div>
+    <div id="lastsync" class="mute" style="margin-top:8px;font-size:13px"></div>
   </section>
 </main>
 
@@ -115,7 +137,7 @@ async function api(path, body) {
 function banner(msg) { const b = $("banner"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
 function setBusy(v) {
   busy = v;
-  ["load","preview","sync","refresh","opreview","save"].forEach(i => $(i).disabled = v);
+  ["load","preview","sync","refresh","opreview"].forEach(i => $(i).disabled = v);
   $("oapply").disabled = v || !lastPreviewClean;
   $("cancel").style.display = v ? "" : "none";
 }
@@ -167,6 +189,9 @@ function render() {
   $("syncinfo").textContent = s.daily_sync ? `On: every day at ${fmtTime(s.daily_sync.hour, s.daily_sync.minute)}.` : "Off.";
   $("syncon").textContent = s.daily_sync ? "Change time" : "Turn on";
   $("syncoff").style.display = s.daily_sync ? "" : "none";
+  $("autoorg").checked = !!s.auto_organize;
+  const ls = s.last_sync;
+  $("lastsync").innerHTML = ls ? `Last sync ${esc(ls.time)}: <span class="${ls.code === 0 ? "ok" : "bad"}">${esc(ls.summary)}</span>` : (s.daily_sync ? "No sync has run yet." : "");
   if (s.daily_sync) $("synctime").value = `${s.daily_sync.hour}:${s.daily_sync.minute}`;
   if (s.configured && !$("url").value) { const known = [...$("urlpick").options].some(o => o.value === s.canvas_url); if (known) $("urlpick").value = s.canvas_url; else { $("urlpick").value = "other"; $("url").value = s.canvas_url; $("url").style.display = ""; } }
   $("classinfo").textContent = !s.classes.exists ? `Classes folder not found: ${s.classes.root}` : s.classes.current ? `Filing into ${s.classes.root}/${s.classes.current}` : `Filing into ${s.classes.root}`;
@@ -174,13 +199,32 @@ function render() {
 const esc = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 async function refreshStatus() { try { state = await api("/api/status"); render(); } catch (e) { banner(e.message); } }
 
+const termOf = c => { const m = (c.raw || "").match(/(20\d{2})[\s_-]*(Spring|Summer|Fall|Winter)/i); return m ? `${m[1]} ${m[2][0].toUpperCase()}${m[2].slice(1).toLowerCase()}` : "Other"; };
 function renderCourses() {
   const q = $("filter").value.toLowerCase();
-  $("courses").innerHTML = allCourses.filter(c => c.raw.toLowerCase().includes(q)).map(c =>
-    `<li><label><input type="checkbox" value="${esc(c.code)}" ${chosen.has(c.code) ? "checked" : ""}><span>${esc(c.name || c.code)}<small>${esc(c.code)}</small></span></label></li>`).join("");
+  const groups = {};
+  allCourses.filter(c => c.raw.toLowerCase().includes(q)).forEach(c => (groups[termOf(c)] = groups[termOf(c)] || []).push(c));
+  $("courses").innerHTML = Object.keys(groups).sort().reverse().map(t =>
+    `<li class="grp"><span>${esc(t)}</span><button data-term="${esc(t)}">${groups[t].every(c => chosen.has(c.code)) ? "Clear" : "Select"} all</button></li>` +
+    groups[t].map(c => `<li><label><input type="checkbox" value="${esc(c.code)}" ${chosen.has(c.code) ? "checked" : ""}><span>${esc(c.name || c.code)}<small>${esc(c.code)}</small></span></label></li>`).join("")).join("");
   updateCount();
 }
-function updateCount() { $("count").textContent = chosen.size + " checked"; }
+function updateCount() { $("count").textContent = `${chosen.size} of ${allCourses.length} classes will be imported.`; }
+let saveTimer;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  if (!chosen.size) { $("savestate").textContent = "Pick at least one class to save."; return; }
+  $("savestate").textContent = "Saving…";
+  saveTimer = setTimeout(async () => {
+    try { await api("/api/courses/select", { courses: [...chosen] }); banner(""); $("savestate").textContent = "Saved."; await refreshStatus(); }
+    catch (e) { banner(e.message); $("savestate").textContent = ""; }
+  }, 400);
+}
+function setAll(on, filterFn) {
+  const q = $("filter").value.toLowerCase();
+  allCourses.filter(c => c.raw.toLowerCase().includes(q) && (!filterFn || filterFn(c))).forEach(c => on ? chosen.add(c.code) : chosen.delete(c.code));
+  renderCourses(); scheduleSave();
+}
 
 $("load").onclick = async () => {
   const r = await runJob("/api/courses/list", {}, "log2");
@@ -189,8 +233,7 @@ $("load").onclick = async () => {
   chosen = new Set(state.selected);
   if (!allCourses.length) { banner("No courses could be read from the output. Check the log."); return; }
   $("log2").style.display = "none";
-  ["filter","courses","saverow"].forEach(i => $(i).style.display = "");
-  $("filter").style.display = "";
+  ["filter","courses","saverow","selall","selnone"].forEach(i => $(i).style.display = "");
   renderCourses();
 };
 function parseCourses(out) {
@@ -207,12 +250,11 @@ function parseCourses(out) {
   }
   return res;
 }
-$("courses").onchange = e => { e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value); updateCount(); };
+$("courses").onchange = e => { e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value); renderCourses(); scheduleSave(); };
+$("courses").onclick = e => { const t = e.target.dataset && e.target.dataset.term; if (t) { const on = !allCourses.filter(c => termOf(c) === t).every(c => chosen.has(c.code)); setAll(on, c => termOf(c) === t); } };
+$("selall").onclick = () => setAll(true);
+$("selnone").onclick = () => setAll(false);
 $("filter").oninput = renderCourses;
-$("save").onclick = async () => {
-  try { await api("/api/courses/select", { courses: [...chosen] }); banner(""); await refreshStatus(); }
-  catch (e) { banner(e.message); }
-};
 $("preview").onclick = () => runJob("/api/download/preview", {}, "log3");
 $("sync").onclick = async () => { await runJob("/api/download/sync", {}, "log3"); };
 $("refresh").onclick = () => {
@@ -221,67 +263,92 @@ $("refresh").onclick = () => {
 };
 $("cancel").onclick = () => api("/api/jobs/cancel", {});
 
-function parseOrganizer(lines) {
-  const rows = {}, order = [];
-  let section = "";
-  for (const l of lines) {
-    if (l.startsWith("Course mappings:")) section = "map";
-    else if (l.startsWith("Planned results:")) section = "res";
-    else if (!l.startsWith("  ")) section = "";
-    else if (section === "map") {
-      const m = l.match(/^  (\S+) -> (.+?)(?: \[(\w+)\])?$/);
-      if (!m) continue;
-      const unresolved = m[2].startsWith("UNRESOLVED");
-      rows[m[1]] = { course: m[1], folder: m[2], unresolved, note: unresolved ? m[2] : m[3] || "", counts: "" };
-      order.push(m[1]);
-    } else if (section === "res") {
-      const m = l.match(/^  (\S+): (.+)$/);
-      if (m && rows[m[1]]) rows[m[1]].counts = m[2];
-    }
-  }
-  return order.map(k => rows[k]);
-}
 function suggestName(course) {
   const m = course.match(/([A-Za-z]{2,4})(\d{3})/);
   return m ? `${m[1].toUpperCase()} ${m[2]} - ` : "";
 }
-function renderMap(rows) {
-  const tb = $("maptable").querySelector("tbody");
-  $("maptable").style.display = rows.length ? "" : "none";
-  const opts = `<option value="">Choose a class folder…</option>` + state.classes.folders.map(f => `<option>${esc(f)}</option>`).join("") + `<option value="__new">New folder…</option>`;
-  tb.innerHTML = rows.map(r => r.unresolved
-    ? `<tr><td>${esc(r.course)}</td><td><select data-course="${esc(r.course)}">${opts}</select> <input type="text" class="newname" data-for="${esc(r.course)}" value="${esc(suggestName(r.course))}" size="30" style="display:none"><br><small class="warn">${esc(r.note)}</small></td><td></td></tr>`
-    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(r.counts)}</td></tr>`).join("");
+let plan = null, skips = new Set();
+const LABEL = { copy: ["new", "new"], update: ["updated", "updated"], "conflict-copy": ["conflict copy", "conflict"] };
+function folderSelect(course, current, unresolved) {
+  const opts = (unresolved ? `<option value="">Choose a class folder…</option>` : "") +
+    state.classes.folders.map(f => `<option${f === current ? " selected" : ""}>${esc(f)}</option>`).join("") + `<option value="__new">New folder…</option>`;
+  return `<select data-course="${esc(course)}" data-orig="${esc(unresolved ? "" : current)}">${opts}</select> <input type="text" class="newname" data-for="${esc(course)}" value="${esc(suggestName(course))}" size="28" style="display:none">`;
+}
+function courseCounts(course) {
+  const c = { copy: 0, update: 0, "conflict-copy": 0, filed: 0, skipped: 0 };
+  for (const f of plan.files) {
+    if (f.course !== course) continue;
+    if (f.action in LABEL) { if (skips.has(f.key)) c.skipped++; else c[f.action]++; }
+    else if (f.action.startsWith("unchanged")) c.filed++;
+    else if (f.action === "user-skipped") c.skipped++;
+  }
+  return c;
+}
+function countText(c) {
+  return [c.copy && `${c.copy} new`, c.update && `${c.update} updated`, c["conflict-copy"] && `${c["conflict-copy"]} conflict`, c.filed && `${c.filed} already filed`, c.skipped && `${c.skipped} left out`].filter(Boolean).join(" · ") || "nothing to do";
+}
+function renderPlan() {
+  if (!plan) { $("plan").innerHTML = ""; $("plansum").textContent = ""; return; }
+  const cards = [];
+  const mapped = new Map(plan.mappings.map(m => [m.course, m]));
+  const names = [...plan.mappings.map(m => m.course), ...plan.unresolved.map(u => u.course)];
+  let total = 0;
+  for (const course of names) {
+    const m = mapped.get(course), un = plan.unresolved.find(u => u.course === course);
+    const files = plan.files.filter(f => f.course === course && (f.action in LABEL || f.action === "user-skipped"));
+    const c = courseCounts(course); total += c.copy + c.update + c["conflict-copy"];
+    const dirs = {};
+    files.forEach(f => { const i = f.key.indexOf("/"); const rel = f.action === "user-skipped" ? f.key.slice(i + 1) : f.to; const d = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""; (dirs[d] = dirs[d] || []).push({ f, name: rel.slice(rel.lastIndexOf("/") + 1) }); });
+    const body = un ? `<div class="warn" style="padding:8px 0">${esc(un.reason)}. Pick a folder above, then preview again.</div>` :
+      Object.keys(dirs).sort().map(d => `<div class="dir">${esc(m.folder)}${d ? " / " + esc(d.replace(/\//g, " / ")) : ""}</div>` + dirs[d].map(({ f, name }) => {
+        const off = skips.has(f.key) || f.action === "user-skipped", L = LABEL[f.action];
+        return `<label class="f${off ? " off" : ""}"><input type="checkbox" data-key="${esc(f.key)}" ${off ? "" : "checked"}><span class="nm">${esc(name)}</span>${L && !off ? ` <span class="badge ${L[1]}">${L[0]}</span>` : ""}</label>`;
+      }).join("")).join("") +
+      (c.filed ? `<div class="f muted">${c.filed} file(s) already in the class folder.</div>` : "") +
+      (plan.files.some(f => f.course === course && /^(duplicate|empty)/.test(f.action)) ? `<div class="f muted">${plan.files.filter(f => f.course === course && /^(duplicate|empty)/.test(f.action)).length} duplicate or empty file(s) are ignored.</div>` : "");
+    cards.push(`<details ${(files.length <= 40 || un) ? "open" : ""}><summary><strong>${esc(course)}</strong> <span class="mute">→</span> ${folderSelect(course, m ? m.folder : "", !!un)} <span class="pill">${esc(un ? "needs a folder" : m.source)}</span> <span class="mute">${esc(un ? "" : countText(c))}</span></summary><div class="body">${body}</div></details>`);
+  }
+  $("plan").innerHTML = cards.join("");
+  $("plansum").textContent = total ? `${total} file(s) will be copied into your class folders. Untick any file to leave it out, or change a class folder and preview again.` : "Nothing new to file.";
 }
 function collectMaps() {
-  document.querySelectorAll("#maptable select[data-course]").forEach(sel => {
+  document.querySelectorAll("#plan select[data-course]").forEach(sel => {
     const course = sel.dataset.course;
     let v = sel.value;
-    if (v === "__new") v = document.querySelector(`#maptable input.newname[data-for="${CSS.escape(course)}"]`).value.trim();
-    if (v && !/[\/]/.test(v)) maps[course] = v; else delete maps[course];
+    if (v === "__new") v = document.querySelector(`#plan input.newname[data-for="${CSS.escape(course)}"]`).value.trim();
+    if (v && v !== sel.dataset.orig && !/[\/]/.test(v)) maps[course] = v; else if (!v) delete maps[course];
   });
 }
-$("maptable").onchange = e => {
-  const t = e.target, c = t.dataset.course;
-  if (c) { const box = document.querySelector(`#maptable input.newname[data-for="${CSS.escape(c)}"]`); box.style.display = t.value === "__new" ? "" : "none"; }
-  lastPreviewClean = false; $("oapply").disabled = true;
+$("plan").onchange = e => {
+  const t = e.target;
+  if (t.dataset.key) {
+    t.checked ? skips.delete(t.dataset.key) : skips.add(t.dataset.key);
+    const open = [...document.querySelectorAll("#plan details")].map(d => d.open);
+    renderPlan(); document.querySelectorAll("#plan details").forEach((d, i) => d.open = open[i]);
+    return;
+  }
+  const c = t.dataset.course;
+  if (c) { document.querySelector(`#plan input.newname[data-for="${CSS.escape(c)}"]`).style.display = t.value === "__new" ? "" : "none"; lastPreviewClean = false; $("oapply").disabled = true; $("plansum").textContent = "Folder changed. Press Preview mapping to update the list."; }
 };
+// Keep the folder dropdown usable inside a <summary> without toggling the section.
+$("plan").addEventListener("click", e => { if (e.target.closest("summary") && e.target.closest("select, input")) e.preventDefault(); }, true);
 $("opreview").onclick = async () => {
   collectMaps();
-  const r = await runJob("/api/organize/preview", { maps }, "log4");
+  const r = await runJob("/api/organize/preview", { maps, skips: [...skips] }, "log4");
   if (!r) return;
-  const rows = parseOrganizer(r.lines);
   await refreshStatus();
-  renderMap(rows);
-  lastPreviewClean = r.code === 0 && rows.length > 0;
+  try { plan = await api("/api/organize/plan"); } catch (e) { plan = null; }
+  renderPlan();
+  lastPreviewClean = r.code === 0 && !!plan && plan.mappings.length > 0 && !plan.unresolved.length;
   $("oapply").disabled = !lastPreviewClean;
-  if (r.code === 2) banner("Some courses need a class folder. Pick one in the table and preview again.");
+  if (r.code === 0) $("log4").style.display = "none";
+  if (r.code === 2) banner("Some courses need a class folder. Pick one below and preview again.");
 };
 $("oapply").onclick = async () => {
   if (!confirm("Copy files into your class folders now? Existing files are never overwritten; differences are saved as Canvas conflict copies.")) return;
-  const r = await runJob("/api/organize/apply", { maps }, "log4");
-  lastPreviewClean = false; $("oapply").disabled = true;
-  if (r && r.code === 0) await refreshStatus();
+  const r = await runJob("/api/organize/apply", { maps, skips: [...skips] }, "log4");
+  lastPreviewClean = false; $("oapply").disabled = true; plan = null; skips = new Set(); renderPlan();
+  if (r && r.code === 0) { await refreshStatus(); $("plansum").textContent = "Done. Press Preview mapping to see what is left."; }
 };
 
 const fmtTime = (h, m) => new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -310,6 +377,13 @@ $("syncon").onclick = async () => {
   const [hour, minute] = $("synctime").value.split(":").map(Number);
   try { await api("/api/sync/enable", { hour, minute }); banner(""); await refreshStatus(); } catch (e) { banner(e.message); }
 };
+$("autoorg").onchange = async () => {
+  try { await api("/api/sync/auto-organize", { enabled: $("autoorg").checked }); banner(""); await refreshStatus(); }
+  catch (e) { banner(e.message); await refreshStatus(); }
+};
+const openFolder = purpose => api("/api/open-folder", { purpose }).catch(e => banner(e.message));
+$("opendest").onclick = () => openFolder("destination");
+$("openclasses").onclick = () => openFolder("classes");
 $("syncoff").onclick = async () => { await api("/api/sync/disable", {}); await refreshStatus(); };
 $("quit").onclick = async () => {
   if (!confirm("Quit Canvas Organizer? Daily sync keeps running if you turned it on.")) return;

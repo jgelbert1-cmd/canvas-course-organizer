@@ -42,6 +42,9 @@ AGENT_LABEL = "com.local.canvas-module-downloader"
 SECURITY = os.environ.get("CANVAS_UI_SECURITY", "/usr/bin/security")
 LAUNCHCTL = os.environ.get("CANVAS_UI_LAUNCHCTL", "/bin/launchctl")
 SETTINGS_FILE = CONFIG_ROOT / "ui-settings.json"
+PLAN_FILE = CONFIG_ROOT / "organize-plan.json"
+AUTO_ORGANIZE_FILE = CONFIG_ROOT / "auto-organize.txt"
+LAST_SYNC_FILE = CONFIG_ROOT / "logs/last-sync.json"
 DEFAULT_PORT = 47813
 TOKEN_RE = re.compile(r"^[A-Za-z0-9~_.\-]{10,300}$")
 CURRENT_DIR_RE = re.compile(r"^(?:\d+\s+)?Current(?:\s*-\s*.+)?$", re.IGNORECASE)
@@ -85,7 +88,7 @@ def load_settings() -> dict:
         return {}
 
 
-def save_setting(key: str, value: str) -> None:
+def save_setting(key: str, value: object) -> None:
     ensure_config_root()
     data = load_settings()
     data[key] = value
@@ -110,6 +113,26 @@ def write_private(path: Path, text: str) -> None:
     tmp.write_text(text, encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(path)
+
+
+def auto_organize_on() -> bool:
+    return bool(load_settings().get("auto_organize"))
+
+
+def sync_auto_organize_file() -> None:
+    """background-sync.zsh looks for this file; it holds the Classes folder to file into."""
+    if auto_organize_on():
+        write_private(AUTO_ORGANIZE_FILE, str(classes_root()) + "\n")
+    else:
+        AUTO_ORGANIZE_FILE.unlink(missing_ok=True)
+
+
+def last_sync() -> dict | None:
+    try:
+        data = json.loads(LAST_SYNC_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
 
 
 def token_saved(url: str) -> bool:
@@ -153,6 +176,8 @@ def status() -> dict:
         "destination": str(destination()),
         "destination_exists": destination().is_dir(),
         "daily_sync": sync_schedule(),
+        "auto_organize": auto_organize_on(),
+        "last_sync": last_sync(),
         "classes": current_class_folders(),
         "fake": bool(FAKE_DOWNLOADER),
     }
@@ -201,10 +226,12 @@ def enable_sync(hour: int, minute: int) -> str | None:
             (DOWNLOADER_DIR / "bin/canvas-downloader", runtime / "bin/canvas-downloader"),
             (COMMON_ZSH, runtime / "lib/common.zsh"),
             (DOWNLOADER_DIR / "scripts/background-sync.zsh", runtime / "scripts/background-sync.zsh"),
+            (ORGANIZER, runtime / "scripts/organize_canvas_files.py"),
         ):
             shutil.copy2(src, dst)
             dst.chmod(0o700)
         (CONFIG_ROOT / "logs").mkdir(exist_ok=True)
+        sync_auto_organize_file()
         plist = {
             "Label": AGENT_LABEL,
             "ProgramArguments": ["/bin/zsh", str(runtime / "scripts/background-sync.zsh")],
@@ -305,9 +332,14 @@ def downloader_cmd(extra: list[str], courses: list[str] | None) -> list[str]:
     return ["zsh", "-c", script, "zsh", str(COMMON_ZSH), *args]
 
 
-def organizer_cmd(maps: dict[str, str], apply: bool) -> list[str]:
+def organizer_cmd(maps: dict[str, str], apply: bool, skips: list[str] | None = None,
+                  plan_file: Path | None = None) -> list[str]:
     cmd = [sys.executable, str(ORGANIZER), "--classes-root", str(classes_root()),
            "--downloads-root", str(destination()), "--verbose"]
+    if plan_file:
+        cmd += ["--json-plan", str(plan_file)]
+    for key in skips or []:
+        cmd.append(f"--skip={key}")
     for course in selected_courses():
         cmd += ["--course", course]
     for course, folder in maps.items():
@@ -315,6 +347,13 @@ def organizer_cmd(maps: dict[str, str], apply: bool) -> list[str]:
     if apply:
         cmd.append("--apply")
     return cmd
+
+
+def valid_key(value: object) -> bool:
+    return (
+        isinstance(value, str) and 0 < len(value) <= 600 and "/" in value
+        and not re.search(r"[\r\n\x00]", value) and ".." not in value.split("/")
+    )
 
 
 def valid_name(value: object) -> bool:
@@ -366,6 +405,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"app": "canvas-organizer"})
         if not self.authorized():
             return self.send_json({"error": "unauthorized"}, 403)
+        if path == "/api/organize/plan":
+            try:
+                return self.send_json(json.loads(PLAN_FILE.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                return self.send_json({"error": "No preview yet."}, 404)
         if path == "/api/status":
             return self.send_json(status())
         match = re.fullmatch(r"/api/jobs/([0-9a-f]+)", path)
@@ -425,6 +469,29 @@ class Handler(BaseHTTPRequestHandler):
                 write_private(CONFIG_ROOT / "destination.txt", chosen + "\n")
             else:
                 save_setting("classes_root", chosen)
+                sync_auto_organize_file()
+            return self.send_json({"ok": True})
+
+        if path == "/api/open-folder":
+            purpose = data.get("purpose")
+            if purpose not in {"destination", "classes"}:
+                return self.send_json({"error": "bad request"}, 400)
+            target = destination() if purpose == "destination" else classes_root()
+            if not target.is_dir():
+                return self.send_json({"error": f"Folder not found: {target}"}, 400)
+            subprocess.run(["open", str(target)], capture_output=True)
+            return self.send_json({"ok": True})
+
+        if path == "/api/sync/auto-organize":
+            if not isinstance(data.get("enabled"), bool):
+                return self.send_json({"error": "bad request"}, 400)
+            save_setting("auto_organize", data["enabled"])
+            sync_auto_organize_file()
+            if sync_schedule():  # refresh the copied scripts the schedule runs
+                when = sync_schedule()
+                error = enable_sync(when["hour"], when["minute"])
+                if error:
+                    return self.send_json({"error": error}, 500)
             return self.send_json({"ok": True})
 
         if path == "/api/sync/enable":
@@ -479,9 +546,15 @@ class Handler(BaseHTTPRequestHandler):
             maps = data.get("maps") or {}
             if not isinstance(maps, dict) or not all(valid_name(k) and valid_name(v) for k, v in maps.items()):
                 return self.send_json({"error": "Invalid folder mapping."}, 400)
+            skips = data.get("skips") or []
+            if not isinstance(skips, list) or not all(valid_key(k) for k in skips):
+                return self.send_json({"error": "Invalid skipped file."}, 400)
+            preview = path.endswith("preview")
+            if preview:
+                PLAN_FILE.unlink(missing_ok=True)
             return self.job_response(
-                "Organize preview" if path.endswith("preview") else "Organize files",
-                organizer_cmd(maps, path.endswith("apply")),
+                "Organize preview" if preview else "Organize files",
+                organizer_cmd(maps, not preview, skips, PLAN_FILE if preview else None),
             )
 
         if path == "/api/jobs/cancel":
