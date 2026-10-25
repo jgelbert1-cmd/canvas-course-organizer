@@ -24,6 +24,8 @@ CURRENT_DIR_RE = re.compile(r"^(?:\d+\s+)?Current(?:\s*-\s*.+)?$", re.IGNORECASE
 SLIDE_EXTENSIONS = {".ppt", ".pptx", ".key"}
 SLIDE_WORDS = re.compile(r"(?:^|[^a-z])(slide|slides|lecture|deck)(?:[^a-z]|$)", re.IGNORECASE)
 SOURCE_PRIORITY = {"assignments": 1, "modules": 2, "announcements": 3, "discussions": 4, "files": 5}
+HTML_EXTENSIONS = {".html", ".htm"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         metavar="COURSE=CLASS_FOLDER",
         help="Map a cache course directory to a direct child of the classes root",
+    )
+    parser.add_argument(
+        "--include-pages",
+        action="store_true",
+        help="Also copy Canvas page copies (.html) and the images embedded in them",
     )
     parser.add_argument("--apply", action="store_true", help="Create folders and copy files")
     parser.add_argument("--verbose", action="store_true", help="Print every planned file action")
@@ -215,6 +222,19 @@ def destination_relative(class_dir: Path, relative: Path, source: Path) -> Path:
     return Path(material_base, *remainder)
 
 
+def collapse_repeats(path: Path) -> Path:
+    """Turn "Intro Page/Intro Page/file.pdf" into "Intro Page/file.pdf".
+
+    The downloader nests files linked from a module page in a folder named
+    after the page, inside another folder with the same name.
+    """
+    parts: list[str] = []
+    for part in path.parts:
+        if not parts or part.casefold() != parts[-1].casefold():
+            parts.append(part)
+    return Path(*parts)
+
+
 def source_sort_key(item: tuple[Path, Path]) -> tuple[int, str]:
     relative, _source = item
     top = relative.parts[0].casefold() if len(relative.parts) > 1 else ""
@@ -234,6 +254,49 @@ def course_files(course_dir: Path) -> list[tuple[Path, Path]]:
             continue
         found.append((relative, source))
     return sorted(found, key=source_sort_key)
+
+
+def canvas_page_file(source: Path) -> bool:
+    """True for Canvas page copies and the images pulled out of their bodies.
+
+    The downloader saves each page, assignment, discussion and announcement as
+    <title>.html and puts files embedded in it in a sibling <title>/ folder.
+    The syllabus is kept because it is usually worth having offline.
+    """
+    suffix = source.suffix.casefold()
+    if suffix in HTML_EXTENSIONS:
+        return "syllabus" not in source.name.casefold()
+    if suffix in IMAGE_EXTENSIONS:
+        parent = source.parent
+        return any((parent.parent / f"{parent.name}{ext}").is_file() for ext in HTML_EXTENSIONS)
+    return False
+
+
+class ClassFolderIndex:
+    """Find files already somewhere in a class folder by content, hashing lazily."""
+
+    def __init__(self, class_dir: Path) -> None:
+        self.by_size: dict[int, list[Path]] = {}
+        self.hashes: dict[Path, str] = {}
+        if not class_dir.is_dir():
+            return
+        for item in class_dir.rglob("*"):
+            relative = item.relative_to(class_dir)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if item.is_file() and not item.is_symlink():
+                self.by_size.setdefault(item.stat().st_size, []).append(item)
+
+    def find(self, size: int, digest: str) -> Path | None:
+        for item in self.by_size.get(size, []):
+            if item not in self.hashes:
+                try:
+                    self.hashes[item] = sha256(item)
+                except OSError:
+                    self.hashes[item] = ""
+            if self.hashes[item] == digest:
+                return item
+        return None
 
 
 def within_root(path: Path, root: Path) -> bool:
@@ -283,10 +346,8 @@ def main() -> int:
         requested = saved_course_selection()
     if requested:
         missing = requested - {item.name for item in all_courses}
-        if missing:
-            label = "directory" if len(missing) == 1 else "directories"
-            print(f"Selected cache course {label} not found: {', '.join(sorted(missing))}", file=sys.stderr)
-            return 1
+        for name in sorted(missing):
+            print(f"Not downloaded yet, skipping: {name}")
         all_courses = [item for item in all_courses if item.name in requested]
 
     if not all_courses:
@@ -296,7 +357,9 @@ def main() -> int:
     selected_terms = {term for item in all_courses if (term := course_term(item.name))}
     if active_classes_root != classes_root and len(selected_terms) == 1:
         selected_term = next(iter(selected_terms))
-        if selected_term.casefold() not in active_classes_root.name.casefold():
+        season, year = selected_term.casefold().split()
+        folder_words = re.findall(r"[a-z]+|\d+", active_classes_root.name.casefold())
+        if season not in folder_words or year not in folder_words:
             print(
                 f"Canvas selection is {selected_term}, but the current class folder is "
                 f"{active_classes_root.name}. Resolve the term transition before organizing.",
@@ -346,20 +409,25 @@ def main() -> int:
         mappings.append((course_dir.name, folder_name, folder_display, match_source))
         seen_hashes = seen_by_course.setdefault(course_dir.name, set())
         counts = counters.setdefault(course_dir.name, Counter())
+        existing_files = ClassFolderIndex(class_dir)
 
         for relative, source in course_files(course_dir):
-            if source.stat().st_size == 0:
+            size = source.stat().st_size
+            if size == 0:
                 counts["empty-skipped"] += 1
                 continue
+            if not args.include_pages and canvas_page_file(source):
+                counts["canvas-page-skipped"] += 1
+                continue
             source_hash = sha256(source)
-            deduplicate = source.suffix.casefold() not in {".html", ".htm"}
+            deduplicate = source.suffix.casefold() not in HTML_EXTENSIONS
             if deduplicate and source_hash in seen_hashes:
                 counts["duplicate-skipped"] += 1
                 continue
             if deduplicate:
                 seen_hashes.add(source_hash)
 
-            destination_rel = destination_relative(class_dir, relative, source)
+            destination_rel = collapse_repeats(destination_relative(class_dir, relative, source))
             destination = class_dir / destination_rel
             if not within_root(destination, class_dir):
                 print(f"Unsafe destination rejected: {destination}", file=sys.stderr)
@@ -386,6 +454,12 @@ def main() -> int:
                         action = "unchanged-conflict"
                     else:
                         action = "conflict-copy"
+
+            # The same file may already be filed under another name or folder,
+            # for example from an earlier quarter's layout or a manual copy.
+            if action in {"copy", "conflict-copy"} and existing_files.find(size, source_hash):
+                counts["already-in-class-folder"] += 1
+                continue
 
             counts[action] += 1
             plan.append(

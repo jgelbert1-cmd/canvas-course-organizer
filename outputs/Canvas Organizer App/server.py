@@ -305,13 +305,15 @@ def downloader_cmd(extra: list[str], courses: list[str] | None) -> list[str]:
     return ["zsh", "-c", script, "zsh", str(COMMON_ZSH), *args]
 
 
-def organizer_cmd(maps: dict[str, str], apply: bool) -> list[str]:
+def organizer_cmd(maps: dict[str, str], apply: bool, include_pages: bool = False) -> list[str]:
     cmd = [sys.executable, str(ORGANIZER), "--classes-root", str(classes_root()),
            "--downloads-root", str(destination()), "--verbose"]
     for course in selected_courses():
         cmd += ["--course", course]
     for course, folder in maps.items():
         cmd += ["--map", f"{course}={folder}"]
+    if include_pages:
+        cmd.append("--include-pages")
     if apply:
         cmd.append("--apply")
     return cmd
@@ -479,9 +481,12 @@ class Handler(BaseHTTPRequestHandler):
             maps = data.get("maps") or {}
             if not isinstance(maps, dict) or not all(valid_name(k) and valid_name(v) for k, v in maps.items()):
                 return self.send_json({"error": "Invalid folder mapping."}, 400)
+            include_pages = data.get("include_pages", False)
+            if not isinstance(include_pages, bool):
+                return self.send_json({"error": "Invalid include_pages value."}, 400)
             return self.job_response(
                 "Organize preview" if path.endswith("preview") else "Organize files",
-                organizer_cmd(maps, path.endswith("apply")),
+                organizer_cmd(maps, path.endswith("apply"), include_pages),
             )
 
         if path == "/api/jobs/cancel":

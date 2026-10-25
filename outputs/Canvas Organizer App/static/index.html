@@ -27,6 +27,7 @@
   ul.courses li:last-child { border-bottom:0; }
   ul.courses label { display:flex; gap:10px; cursor:pointer; }
   ul.courses small { display:block; color:var(--mute); }
+  ul.courses li.term { background:var(--bg); color:var(--mute); font-size:13px; font-weight:600; padding:6px 12px; position:sticky; top:0; }
   input[type=text], select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
   table { width:100%; border-collapse:collapse; margin-top:10px; }
   td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
@@ -63,7 +64,8 @@
     <div id="selected" class="mute"></div>
     <div class="row"><button id="load" class="primary">Load my Canvas courses</button><input type="text" id="filter" placeholder="Filter…" style="display:none"></div>
     <ul id="courses" class="courses" style="display:none"></ul>
-    <div class="row" id="saverow" style="display:none"><button id="save" class="primary">Save selection</button><span id="count" class="mute"></span></div>
+    <div id="coursenote" class="warn" style="display:none;margin-top:8px;font-size:13px"></div>
+    <div class="row" id="saverow" style="display:none"><button id="save" class="primary">Save selection</button><button id="newest">Check newest term only</button><span id="count" class="mute"></span></div>
     <pre id="log2" class="log"></pre>
   </section>
 
@@ -84,6 +86,8 @@
     <h2><span class="num">4</span> Organize into class folders</h2>
     <div class="mute"><span id="classinfo"></span> <button id="pickclasses">Change…</button></div>
     <div class="row"><button id="opreview">Preview mapping</button><button id="oapply" class="primary" disabled>Apply</button></div>
+    <label class="mute" style="display:block;margin-top:8px;font-size:13px"><input type="checkbox" id="pages"> Also copy Canvas page copies (.html files of pages, assignments, announcements and discussions). Off by default; the syllabus is always kept.</label>
+    <div class="mute" style="margin-top:4px;font-size:13px">Files already somewhere in the class folder, even under another name, are skipped.</div>
     <table id="maptable" style="display:none"><thead><tr><th>Canvas course</th><th>Class folder</th><th>Files</th></tr></thead><tbody></tbody></table>
     <pre id="log4" class="log"></pre>
   </section>
@@ -115,7 +119,7 @@ async function api(path, body) {
 function banner(msg) { const b = $("banner"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
 function setBusy(v) {
   busy = v;
-  ["load","preview","sync","refresh","opreview","save"].forEach(i => $(i).disabled = v);
+  ["load","preview","sync","refresh","opreview","save","newest"].forEach(i => $(i).disabled = v);
   $("oapply").disabled = v || !lastPreviewClean;
   $("cancel").style.display = v ? "" : "none";
 }
@@ -150,8 +154,8 @@ async function runJob(startPath, body, logId) {
 
 function render() {
   const s = state, ready = s.configured && s.token_saved;
-  $("access").innerHTML = !s.configured ? `<span class="warn">Not set up yet.</span> Open setup and choose option 1.`
-    : !s.token_saved ? `<span class="warn">${s.canvas_url}</span>: no token found in Keychain. Open setup and choose option 1.`
+  $("access").innerHTML = !s.configured ? `<span class="warn">Not set up yet.</span> Paste your Canvas token below.`
+    : !s.token_saved ? `<span class="warn">${esc(s.canvas_url)}</span>: no token found in Keychain. Paste a new token below.`
     : `<span class="ok">Connected:</span> ${s.canvas_url} (token saved in Keychain)`;
   $("s1").classList.toggle("done", ready);
   $("s2").classList.toggle("locked", !ready);
@@ -174,10 +178,19 @@ function render() {
 const esc = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 async function refreshStatus() { try { state = await api("/api/status"); render(); } catch (e) { banner(e.message); } }
 
+function termsNewestFirst() {
+  return [...new Set(allCourses.map(c => c.term))].sort((a, b) => (Number(b) || 0) - (Number(a) || 0));
+}
 function renderCourses() {
   const q = $("filter").value.toLowerCase();
-  $("courses").innerHTML = allCourses.filter(c => c.raw.toLowerCase().includes(q)).map(c =>
-    `<li><label><input type="checkbox" value="${esc(c.code)}" ${chosen.has(c.code) ? "checked" : ""}><span>${esc(c.name || c.code)}<small>${esc(c.code)}</small></span></label></li>`).join("");
+  const terms = termsNewestFirst();
+  const item = c => `<li><label><input type="checkbox" value="${esc(c.code)}" ${chosen.has(c.code) ? "checked" : ""}><span>${esc(c.name || c.code)}<small>${esc(c.code)}</small></span></label></li>`;
+  $("courses").innerHTML = terms.map((t, i) => {
+    const rows = allCourses.filter(c => c.term === t && c.raw.toLowerCase().includes(q));
+    if (!rows.length) return "";
+    const head = terms.length > 1 ? `<li class="term">${t ? `Canvas term ${esc(t)}` : "Other"}${i === 0 ? " (newest)" : ""}</li>` : "";
+    return head + rows.map(item).join("");
+  }).join("");
   updateCount();
 }
 function updateCount() { $("count").textContent = chosen.size + " checked"; }
@@ -188,25 +201,52 @@ $("load").onclick = async () => {
   allCourses = parseCourses(r.lines.join("\n"));
   chosen = new Set(state.selected);
   if (!allCourses.length) { banner("No courses could be read from the output. Check the log."); return; }
+  const codes = new Set(allCourses.map(c => c.code));
+  const gone = state.selected.filter(c => !codes.has(c));
+  gone.forEach(c => chosen.delete(c));
+  $("coursenote").textContent = gone.length ? `No longer on your Canvas list, unchecked: ${gone.join(", ")}. Press Save selection to drop them.` : "";
+  $("coursenote").style.display = gone.length ? "" : "none";
   $("log2").style.display = "none";
   ["filter","courses","saverow"].forEach(i => $(i).style.display = "");
   $("filter").style.display = "";
   renderCourses();
 };
+// Without -c the downloader prints every visible course as a table:
+//   Term ID    | Course Code  | Course Name
+// The term ID is only on the first row of each term.
 function parseCourses(out) {
-  const res = []; let seen = false;
+  const res = [], seen = new Set(); let term = "", table = false;
+  for (const raw of out.split("\n")) {
+    if (/^Term ID\s*\|/.test(raw)) { table = true; continue; }
+    if (!table || /^-+$/.test(raw.trim())) continue;
+    const parts = raw.split(" | ");
+    if (parts.length < 3) continue;
+    if (parts[0].trim()) term = parts[0].trim();
+    const code = parts[1].trim(), name = parts.slice(2).join(" | ").trim();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    res.push({ code, name, term, raw: `${code} ${name}` });
+  }
+  if (res.length) return res;
+  // Older output style: "  * CODE - NAME" under "Courses found:"
+  let found = false;
   for (const raw of out.split("\n")) {
     const line = raw.trim();
-    if (line.startsWith("Courses found")) { seen = true; continue; }
-    if (!seen) continue;
+    if (line.startsWith("Courses found")) { found = true; continue; }
+    if (!found) continue;
     if (line.startsWith("[DRY RUN]") && res.length) break;
     const m = line.match(/^[*\-•]\s+(.*)$/);
     if (!m) continue;
     const i = m[1].indexOf(" - ");
-    res.push({ code: (i < 0 ? m[1] : m[1].slice(0, i)).trim(), name: i < 0 ? "" : m[1].slice(i + 3).trim(), raw: m[1] });
+    res.push({ code: (i < 0 ? m[1] : m[1].slice(0, i)).trim(), name: i < 0 ? "" : m[1].slice(i + 3).trim(), term: "", raw: m[1] });
   }
   return res;
 }
+$("newest").onclick = () => {
+  const t = termsNewestFirst()[0];
+  chosen = new Set(allCourses.filter(c => c.term === t).map(c => c.code));
+  renderCourses();
+};
 $("courses").onchange = e => { e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value); updateCount(); };
 $("filter").oninput = renderCourses;
 $("save").onclick = async () => {
@@ -251,7 +291,22 @@ function renderMap(rows) {
   const opts = `<option value="">Choose a class folder…</option>` + state.classes.folders.map(f => `<option>${esc(f)}</option>`).join("") + `<option value="__new">New folder…</option>`;
   tb.innerHTML = rows.map(r => r.unresolved
     ? `<tr><td>${esc(r.course)}</td><td><select data-course="${esc(r.course)}">${opts}</select> <input type="text" class="newname" data-for="${esc(r.course)}" value="${esc(suggestName(r.course))}" size="30" style="display:none"><br><small class="warn">${esc(r.note)}</small></td><td></td></tr>`
-    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(r.counts)}</td></tr>`).join("");
+    : `<tr><td>${esc(r.course)}</td><td>${esc(r.folder)} <span class="pill">${esc(r.note)}</span></td><td class="mute">${esc(friendlyCounts(r.counts))}</td></tr>`).join("");
+}
+const COUNT_LABELS = {
+  "copy": "new", "update": "updated", "conflict-copy": "conflict copies", "unchanged": "already filed",
+  "unchanged-conflict": "already filed", "duplicate-skipped": "duplicates skipped",
+  "already-in-class-folder": "already in folder", "canvas-page-skipped": "Canvas pages skipped", "empty-skipped": "empty skipped",
+};
+function friendlyCounts(text) {
+  const totals = {};
+  for (const part of text.split(", ")) {
+    const [k, n] = part.split("=");
+    if (n === undefined) return text;
+    const label = COUNT_LABELS[k] || k;
+    totals[label] = (totals[label] || 0) + Number(n);
+  }
+  return Object.entries(totals).map(([k, n]) => `${n} ${k}`).join(", ");
 }
 function collectMaps() {
   document.querySelectorAll("#maptable select[data-course]").forEach(sel => {
@@ -268,7 +323,7 @@ $("maptable").onchange = e => {
 };
 $("opreview").onclick = async () => {
   collectMaps();
-  const r = await runJob("/api/organize/preview", { maps }, "log4");
+  const r = await runJob("/api/organize/preview", { maps, include_pages: $("pages").checked }, "log4");
   if (!r) return;
   const rows = parseOrganizer(r.lines);
   await refreshStatus();
@@ -279,7 +334,7 @@ $("opreview").onclick = async () => {
 };
 $("oapply").onclick = async () => {
   if (!confirm("Copy files into your class folders now? Existing files are never overwritten; differences are saved as Canvas conflict copies.")) return;
-  const r = await runJob("/api/organize/apply", { maps }, "log4");
+  const r = await runJob("/api/organize/apply", { maps, include_pages: $("pages").checked }, "log4");
   lastPreviewClean = false; $("oapply").disabled = true;
   if (r && r.code === 0) await refreshStatus();
 };
@@ -287,6 +342,7 @@ $("oapply").onclick = async () => {
 const fmtTime = (h, m) => new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 for (const h of [6, 7, 8, 9, 12, 18, 21]) $("synctime").add(new Option(fmtTime(h, 0), `${h}:0`, false, h === 7));
 
+$("pages").onchange = () => { lastPreviewClean = false; $("oapply").disabled = true; };
 $("urlpick").onchange = () => { $("url").style.display = $("urlpick").value === "other" ? "" : "none"; };
 $("changeaccess").onclick = () => { editingAccess = true; render(); };
 $("savetoken").onclick = async () => {
