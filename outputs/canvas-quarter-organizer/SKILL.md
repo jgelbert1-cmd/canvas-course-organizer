@@ -76,6 +76,8 @@ Omit `--map` when all mappings resolve automatically. The user's request to set 
 - Exclude submissions and raw Canvas JSON from class folders.
 - Canvas page copies (`.html` other than the syllabus, and images embedded in them) are skipped unless `--include-pages` is passed. Files whose content already exists anywhere in the class folder are skipped as `already-in-class-folder`.
 - Selected courses that haven't been downloaded yet are skipped with a note instead of stopping the run.
+- Quiz and web link shortcuts (`.url`, `.webloc`) are never copied. Slides go to the slides folder wherever Canvas linked them from, and a file posted in Modules or Files wins over the same file linked from an assignment.
+- On apply, earlier copies the organizer made that nobody edited, and that now belong elsewhere or not at all, are moved to `Removed from class folders/<timestamp>/` next to the state file (or `--removed-dir`). Nothing is deleted.
 - Never overwrite an untracked or user-edited class file. The organizer writes a clearly labeled Canvas conflict copy instead.
 - Keep organizer state in `~/Library/Application Support/Canvas Quarter Organizer/state.json`.
 - After applying, rerun the organizer without `--apply`. A clean result has no new, updated, or conflict copies pending.

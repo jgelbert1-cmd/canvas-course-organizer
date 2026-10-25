@@ -318,17 +318,25 @@ function folderSelect(course, current, unresolved) {
   return `<select data-course="${esc(course)}" data-orig="${esc(unresolved ? "" : current)}">${opts}</select> <input type="text" class="newname" data-for="${esc(course)}" value="${esc(suggestName(course))}" size="28" style="display:none">`;
 }
 function courseCounts(course) {
-  const c = { copy: 0, update: 0, "conflict-copy": 0, filed: 0, skipped: 0 };
+  const c = { copy: 0, update: 0, "conflict-copy": 0, filed: 0, skipped: 0, tidy: 0 };
   for (const f of plan.files) {
     if (f.course !== course) continue;
     if (f.action in LABEL) { if (skips.has(f.key)) c.skipped++; else c[f.action]++; }
     else if (f.action.startsWith("unchanged")) c.filed++;
     else if (f.action === "user-skipped") c.skipped++;
+    else if (f.action === "tidy-remove") c.tidy++;
   }
   return c;
 }
 function countText(c) {
-  return [c.copy && `${c.copy} new`, c.update && `${c.update} updated`, c["conflict-copy"] && `${c["conflict-copy"]} conflict`, c.filed && `${c.filed} already filed`, c.skipped && `${c.skipped} left out`].filter(Boolean).join(" · ") || "nothing to do";
+  return [c.copy && `${c.copy} new`, c.update && `${c.update} updated`, c["conflict-copy"] && `${c["conflict-copy"]} conflict`, c.filed && `${c.filed} already filed`, c.skipped && `${c.skipped} left out`, c.tidy && `${c.tidy} to clean up`].filter(Boolean).join(" · ") || "nothing to do";
+}
+// Copies an earlier run put in the wrong place, or that are no longer wanted
+// (links, page copies). Only files the app made and nobody edited show up here.
+function tidyList(course) {
+  const items = plan.files.filter(f => f.course === course && f.action === "tidy-remove");
+  if (!items.length) return "";
+  return `<div class="dir">Cleaning up from earlier runs</div>` + items.map(f => `<div class="f muted">${esc(f.to)}</div>`).join("");
 }
 function muted(course, action, text) {
   const n = plan.files.filter(f => f.course === course && (typeof action === "string" ? f.action === action : action.test(f.action))).length;
@@ -339,11 +347,11 @@ function renderPlan() {
   const cards = [];
   const mapped = new Map(plan.mappings.map(m => [m.course, m]));
   const names = [...plan.mappings.map(m => m.course), ...plan.unresolved.map(u => u.course)];
-  let total = 0;
+  let total = 0, tidyTotal = 0;
   for (const course of names) {
     const m = mapped.get(course), un = plan.unresolved.find(u => u.course === course);
     const files = plan.files.filter(f => f.course === course && (f.action in LABEL || f.action === "user-skipped"));
-    const c = courseCounts(course); total += c.copy + c.update + c["conflict-copy"];
+    const c = courseCounts(course); total += c.copy + c.update + c["conflict-copy"]; tidyTotal += c.tidy;
     const dirs = {};
     files.forEach(f => { const i = f.key.indexOf("/"); const rel = f.action === "user-skipped" ? f.key.slice(i + 1) : f.to; const d = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""; (dirs[d] = dirs[d] || []).push({ f, name: rel.slice(rel.lastIndexOf("/") + 1) }); });
     const body = un ? `<div class="warn" style="padding:8px 0">${esc(un.reason)}. Pick a folder above, then preview again.</div>` :
@@ -354,11 +362,14 @@ function renderPlan() {
       (c.filed ? `<div class="f muted">${c.filed} file(s) already in the class folder.</div>` : "") +
       muted(course, "already-in-class-folder", "file(s) are already in the class folder under another name or folder, so they're skipped.") +
       muted(course, /^(duplicate|empty)/, "duplicate or empty file(s) are ignored.") +
-      muted(course, "canvas-page-skipped", "Canvas page copies (.html) and their banner images are left out.");
+      muted(course, "canvas-page-skipped", "Canvas page copies (.html) and their banner images are left out.") +
+      muted(course, "link-skipped", "quiz and web link shortcuts (.url) are left out.") +
+      tidyList(course);
     cards.push(`<details ${(files.length <= 40 || un) ? "open" : ""}><summary><strong>${esc(course)}</strong> <span class="mute">→</span> ${folderSelect(course, m ? m.folder : "", !!un)} <span class="pill">${esc(un ? "needs a folder" : m.source)}</span> <span class="mute">${esc(un ? "" : countText(c))}</span></summary><div class="body">${body}</div></details>`);
   }
   $("plan").innerHTML = cards.join("");
-  $("plansum").textContent = total ? `${total} file(s) will be copied into your class folders. Untick any file to leave it out, or change a class folder and preview again.` : "Nothing new to file.";
+  const parts = [total && `${total} file(s) will be copied into your class folders.`, tidyTotal && `${tidyTotal} earlier cop${tidyTotal === 1 ? "y" : "ies"} in the wrong place or no longer needed will be moved out (slides are re-filed under Class Slides).`].filter(Boolean);
+  $("plansum").textContent = parts.length ? parts.join(" ") + " Untick any file to leave it out, or change a class folder and preview again." : "Nothing new to file.";
 }
 function collectMaps() {
   document.querySelectorAll("#plan select[data-course]").forEach(sel => {
@@ -394,7 +405,7 @@ $("opreview").onclick = async () => {
   if (r.code === 2) banner("Some courses need a class folder. Pick one below and preview again.");
 };
 $("oapply").onclick = async () => {
-  if (!confirm("Copy files into your class folders now? Existing files are never overwritten; differences are saved as Canvas conflict copies.")) return;
+  if (!confirm("Copy files into your class folders now? Files you made or edited are never touched. Earlier copies this app made that are in the wrong place get moved to a backup folder in the app's settings, not deleted.")) return;
   const r = await runJob("/api/organize/apply", { maps, skips: [...skips], include_pages: $("pages").checked }, "log4");
   lastPreviewClean = false; $("oapply").disabled = true; plan = null; skips = new Set(); renderPlan();
   if (r && r.code === 0) { await refreshStatus(); $("plansum").textContent = "Done. Press Preview mapping to see what is left."; }
